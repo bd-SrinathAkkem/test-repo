@@ -1,204 +1,28 @@
-This document outlines the process for developing a CI/CD integration, such as a GitHub Action, GitLab Template, Azure DevOps, Jenkins, and Bitbucket Pipe and publishing it to the Marketplace.
-Prerequisites
-Development
-Code Freeze and Release
-Publish to Marketplace
-Post-Release Steps
-References
-Prerequisites
-
-SCM:
-GitHub Actions - black-duck-security-scan
-GitHub account with Black Duck email, aligned with blackduck-inc. 
-Raise IT ticket for access to GitHub - blackduck-inc/black-duck-security-scan: Black Duck Security Action consuming Black Duck scanning tools 
-Mirrored GitLab repo (integrations/mirrored-repos/blackduck-security-action) configured with polaris_bridge and pop_analysis jobs in .gitlab-ci.yml.
-Raise IT ticket for access to integrations/mirrored-repos/blackduck-security-action
-GitLab Template - black-duck-security-scan
-GitLab account with Black Duck email, aligned with Black Duck Inc. 
-Raise IT ticket for access to https://gitlab.com/blackduck-inc/black-duck-security-scanConnect your GitLab account 
-Azure DevOps - blackduck-security-extension
-GitHub account with Black Duck email, aligned with blackduck-inc. 
-Raise IT ticket for access to GitHub - blackduck-inc/blackduck-security-extension 
-Mirrored GitLab repo (integrations/mirrored-repos/blackduck-security-extension) configured with polaris_bridge and pop_analysis jobs in .gitlab-ci.yml.
-Raise IT ticket for access to integrations/mirrored-repos/blackduck-security-extension
-Bitbucket pipe - 
-Guideline for Dev, CF Activity and Publishing Pipe to Marketplace 
-Jenkins - blackduck-security-scan-plugin
-GitHub account with Black Duck email, aligned with blackduck-inc. 
-Raise IT ticket for access to GitHub - jenkinsci/blackduck-security-scan-plugin: Black Duck Security Scan Plugin provides functionality for performing Black Duck Security Scan with Black Duck SCA, Coverity, Polaris and SRM. 
-Existing Workflows:
-GitHub:
-check-dist.yml: Verifies that the dist directory matches the expected state by rebuilding and comparing it with the committed version.
-create-tag.yml: Creates a new tag and release with optional draft or prerelease settings, including a description.
-e2e_test.yaml: Runs end-to-end deployment tests across Linux, macOS, and Windows environments, including artifact downloads, secret extraction, and test execution.
-sync-tags.yml: Synchronizes major and latest tags with the specified or released version, ensuring proper versioning.
-upgrade-actions-version.yml: Handles version upgrades by updating files, rebuilding, and creating a pull request for the new version.
-GitLab:
-e2e_stage.yml: Handles end-to-end (E2E) testing to validate application functionality in staging or QA environments.
-semver_upgrade.yml: Manages semantic versioning and facilitates tag creation for releases.
-To refer to all available scenario options or fields, you can use the following guide: 
-GitLab Template: Tag Management Scenarios for Creating and Syncing Releases 
-Azure DevOps: 
-check-coverage.yml and check-dist.yml ensure code quality by running tests, checking coverage, and verifying build artifacts on every push or pull request;
-create-tag.yml lets you create Git tags and releases manually;
-publish-QAExtension.yml and publish-blackduck-extension.yml build and publish your QA and production Azure DevOps extensions to the Marketplace via manual triggers;
-upgrade-extension-version.yml automates version bumps and creates pull requests for version updates.
-Bitbucket: 
-Guideline for Dev, CF Activity and Publishing Pipe to Marketplace 
-Jenkins: Pipeline job with SCM integration and release steps
-Tools:
-Node.js and npm (for GitHub Action & ADO Extension development)
-JDK 17+, Python3
-Jira for ticket management
-Confluence for documentation (if applicable)
-Development
-
-Create a Feature Branch:
-Create a feature branch from main named after the Jira ticket (e.g., SIGINT-****).
-Example: git checkout -b SIGINT-****
-Develop the Integration:
-GitHub Action:
-Update src/main.ts or the relevant files to implement Black Duck, Polaris, or Coverity scans using Bridge CLI, according to the specified requirements.
-Modify action.yml to include the necessary inputs (e.g., scan parameters).
-GitLab CI/CD:
-Update templates/security_scan.yml or the relevant files to implement the required changes.
-Azure DevOps:
-Update src/main.ts or the relevant files to implement Black Duck, Polaris, or Coverity scans using Bridge CLI, as per the specified requirements.
-Jenkins:
-Update the relevant files to implement Black Duck, Polaris, or Coverity scans using Bridge CLI, according to the specified requirements.
-Bitbucket Pipelines:
-Update the relevant files to implement Black Duck, Polaris, or Coverity scans using Bridge CLI, as per the specified requirements.
-Write and Run Unit Tests:
-For platforms, run equivalent tests locally or via existing CI pipelines and test the functionality.
-Build Distribution Files:
-Generate build folder.
-For GitHub / ADO - npm run all
-Generates a dist/ folder.
-Push and Create Pull Request:
-Push the feature branch to the SCM repository.
-Create a Merge Request to main.
-Address reviewer comments and obtain approval.
-Verify CI Pipelines:
-Use existing CI pipelines inplace to validate changes:
-Check polaris_bridge and pop_analysis jobs in the mirrored repo.
-Fix any failing jobs and merge the PR into main.
-Code Freeze and Release
-
-Verify Completion:
-Ensure all Jira tickets are closed and PRs are merged into main without conflicts.
-Version Update:
-Update package.json (GitHub / ADO) or equivalent configuration files to the next semantic version (e.g., vX.Y.Z).
-Use existing workflows:
-GitHub: upgrade-actions-version.yml - Bumps the version in package json files and creates a PR.
-How to use:
-Go to the Actions tab.
-Select upgrade-actions-version from the workflow list.
-Click Run workflow (top right).
-Fill in the required input:
-ACTION VERSION: The new version number (e.g., vX.Y.Z)
-Click Run workflow.
-The workflow will:
-Update version numbers in all files.
-Commit and push changes to a new branch.
-Create a pull request for review. once approved merges and creates tag.
-GitLab: semver_upgrade.yml - Creates and syncs tags for releases.
-How to use:
-Go to the CI/CD > Pipelines tab in your GitLab project.
-Click Run Pipeline.
-Fill in the following input:
-VERSION=vX.Y.Z
-Click Run Pipeline.
-The workflow will:
-create new tag and pushed to the remote repository.
-Azure DevOps: upgrade-extension-version.yml - Bumps the extension version in all relevant files and creates a PR.
-How to use:
-Go to the Actions tab.
-Select upgrade-extension-version from the workflow list.
-Click Run workflow (top right).
-Fill in the required input:
-EXTENSION VERSION: The new version number (e.g., X.Y.Z)
-Click Run workflow.
-The workflow will:
-Update version numbers in all files.
-Commit and push changes to a new branch.
-Create a pull request for review. once approved merges and creates tag.
-Create tag: (Applicable for Actions/ADO)
-Go to your GitHub repository.
-Click on the Actions tab.
-Find the workflow named "create-tag".
-Click on it and then click the "Run workflow" button.
-Provide the following inputs:
-TAG: The name of the tag you want to create (e.g., v1.2.3).
-TAG_BODY: A description for the tag (optional).
-IS_DRAFT: Whether the tag should be created as a draft (default: false).
-IS_PRERELEASE: Whether the tag should be marked as a prerelease (default: true).
-Click "Run workflow" to create the tag and release.
-Verify Pipeline Results:
-Use existing pipelines to validate scans:
-Check polaris_bridge and pop_analysis jobs for Polaris, Black Duck, and Coverity results and other jobs.
-Address any issues identified.
-QA Approval:
-Submit the tagged release for QA approval via the SIGINT ticket.
-Create SIGINT Ticket:
-Create a Jira ticket assigned to the Security Champion (@Suhas LR).
-Include links to scan results and SBOM from pipelines.
-For reference, please see the sample SIGINT ticket: SIGINT-3169: Action 2.2.0 - security results
-RELEASED
+Requirement is to get all the apis from our document/code and see if any contract changes on the API in new releases of SCM , if any changes are there then notify team or make the necesscery changes and raise a PR may be for 2nd phase
+    It should support backward compatiability also
+    Write some test case in the PR so it will check for old and new version, so if we fix something for new release it should not break old one
  
-Update Documentation:
-Update Confluence Page with release details or via a POLDOCS ticket.(Polaris Documentation | Kanban board)
-For reference, please see the sample POLDOCS ticket: POLDOCS-1222: Github APP 1.0.0 
-READY FOR ENGINEERING REVIEW
-.
-Publish to Marketplace
-
-GitHub Marketplace:
-Manually draft a release to marketplace and mark it as latest and then sync-tags action workflow should be triggered. If not triggered, then manually
-Go to the Actions tab in your repository.
-Select sync-tags from the workflow list.
-Click Run workflow (top right).
-Fill in the required input:
-SYNC VERSION: The new version number (e.g., vX.Y.Z)
-The workflow will:
-Sync major version tag and latest version tag.
-GitLab CI/CD:
-Manually draft a release to marketplace and mark it as latest and then sync-tags action workflow should be triggered. If not triggered, then manually
-Go to the CI/CD > Pipelines tab in your GitLab project.
-Click Run Pipeline.
-Fill in the following inputs:
-SYNC_TAGS=true
-Click Run Pipeline.
-The workflow will:
-All tags are synchronized with the remote repository.
-Azure DevOps:
-Go to the Actions tab in your repository.
-Select publish-blackduck-extension from the workflow list.
-Click Run workflow (top right).
-Set the input isPublish to true (must be checked or set to true).
-Click Run workflow.
-The workflow will:
-Build and package the extension.
-Publish the extension to the Marketplace.
-Jenkins:
-Share the Jenkinsfile via existing release job and configure SCM webhooks.
-Bitbucket Pipelines:
-Guideline for Dev, CF Activity and Publishing Pipe to Marketplace 
-Post-Release Steps
-
-Verify Release:
-Confirm the integration is available in the respective marketplace or repository.
-Test in a sample project.
-Monitor Feedback:
-Track issues via GitHub/GitLab Issues, Azure DevOps work items, or Jira.
-Maintain Documentation:
-Review documentation team’s draft and update the ticket with review comments. 
-References
-
-Metadata syntax reference - GitHub Docs Black Duck Security Scan - GitHub Marketplace Black Duck Documentation Portal 
- ADO | Black Duck Security Scan | Marketplace
-Guideline for Dev, CF Activity and Publishing Pipe to Marketplace 
-SIG Integrations | Active sprints | Polaris Documentation | Kanban board 
-Polaris | Black Duck Hub | SRM
-Central-SCM Support Matrix 
-Integrations Configuration Parameters 
-Black Duck Documentation Portal 
+points that we need to cover -
+    API - any contract changes
+    Feature - ADO - visible rule
+    Env. variable change and if we are using those
+    Rule change - like Action enabled , runner
+ 
+Question - How to get all the APIs that we are using already - Automated scanning of codebase to identify all SCM API calls
+                It will be better if we can get the exact values we are using for those API - is it required for now ?
+    Which all SCM versions we are supporting - atleast we need the min and max version
+    When to run this model , we should do it as part/before of PR
+    How will we be notified when SCM releases new versions? - Webhook, scheduled checks, vendor notifications CI/CD integration to automatically detect API changes
+ 
+ 
+Steps we can follow -
+    API/Feature/Env/Rule Discovery & Inventory -
+        Get our API and contract we are expecting from our code
+    Change Detection -
+        Implement SCM version monitoring
+        API from new SCM Version
+    Testing Framework -
+        Build backward compatibility test suite
+        Implement multi-version testing
+        Set up automated PR generation (may be for future)
+    Documentation Changes -
