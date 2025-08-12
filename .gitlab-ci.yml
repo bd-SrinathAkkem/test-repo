@@ -1,0 +1,76 @@
+include:
+ - local: 'ci/e2e_stage.yml'
+ - local: 'ci/semver_upgrade.yml'
+
+default:
+  tags:
+    - linux
+    - x64
+    
+stages:          
+  - e2e-deployment
+  - e2e-acceptance
+
+e2e-linux-acceptance:       
+  stage: e2e-acceptance
+  extends: .e2e-gitlab
+  variables:
+    XML_PATH_IN_JAR: $ACCEPTANCE_SUITE
+    RUNNER_NAME: "linux"
+    RUNNER_OS: "linux"  
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_REF_NAME == "main"
+
+e2e-mac-acceptance:       
+  stage: e2e-acceptance
+  extends: .e2e-gitlab
+  variables:
+    XML_PATH_IN_JAR: $ACCEPTANCE_SUITE
+    RUNNER_NAME: "macos"
+    RUNNER_OS: "macos"
+  
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_REF_NAME == "main"
+
+e2e-windows-acceptance:       
+  stage: e2e-acceptance
+  extends: .e2e-gitlab
+  variables:
+    XML_PATH_IN_JAR: $ACCEPTANCE_SUITE
+    RUNNER_NAME: "windows"
+    RUNNER_OS: "windows"  
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_REF_NAME == "main"
+
+e2e-linux-deployment:   
+  stage: e2e-deployment    
+  extends: .e2e-gitlab
+  variables:
+    XML_PATH_IN_JAR: $DEPLOYMENT_SUITE
+    RUNNER_NAME: "linux"
+    RUNNER_OS: "linux"
+
+  rules:
+     - if: $CI_PIPELINE_SOURCE == "merge_request_event" && $CI_COMMIT_REF_NAME != "main"
+
+e2e-mac-deployment:   
+  stage: e2e-deployment    
+  extends: .e2e-gitlab
+  variables:
+    XML_PATH_IN_JAR: $DEPLOYMENT_SUITE
+    RUNNER_NAME: "macos"
+    RUNNER_OS: "macos"
+  
+  rules:
+     - if: $CI_PIPELINE_SOURCE == "merge_request_event" && $CI_COMMIT_REF_NAME != "main" 
+
+e2e-windows-deployment:   
+  stage: e2e-deployment    
+  extends: .e2e-gitlab
+  variables:
+    XML_PATH_IN_JAR: $DEPLOYMENT_SUITE
+    RUNNER_NAME: "windows"
+    RUNNER_OS: "windows"
+  
+  rules:
+     - if: $CI_PIPELINE_SOURCE == "merge_request_event" && $CI_COMMIT_REF_NAME != "main"
