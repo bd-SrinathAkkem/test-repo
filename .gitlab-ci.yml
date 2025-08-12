@@ -10,6 +10,7 @@ default:
 stages:          
   - e2e-deployment
   - e2e-acceptance
+  - semver
 
 e2e-linux-acceptance:       
   stage: e2e-acceptance
