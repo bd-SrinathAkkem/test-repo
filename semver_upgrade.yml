@@ -1,9 +1,16 @@
-stages:
-  - validate
-  - tag
-  - release
-  - sync
-  - cleanup
+spec:
+  inputs:
+    version:
+      description: "TEMPLATE VERSION"
+      default: ''
+    create_release:
+      description: "CREATE RELEASE"
+      type: boolean
+      default: false
+    sync_tags:
+      description: "SYNC TAGS"
+      type: boolean
+      default: false
 
 variables:
   GIT_STRATEGY: clone
@@ -41,21 +48,23 @@ variables:
         done
       }
 
-
 validate_version:
   extends: .semver_base
-  stage: validate
+  stage: semver
   script:
     - |
       set -e
+      echo "DEBUG: INPUT_VERSION=$INPUT_VERSION, CI_COMMIT_TAG=$CI_COMMIT_TAG, CI_COMMIT_SHA=$CI_COMMIT_SHA"
       
       # Determine version source
-      if [ -n "${VERSION:-}" ]; then
-        TAG_NAME="$VERSION"
+      if [ -n "${INPUT_VERSION:-}" ]; then
+        TAG_NAME="$INPUT_VERSION"
+        echo "DEBUG: Using INPUT_VERSION: $TAG_NAME"
       elif [ -n "${CI_COMMIT_TAG:-}" ]; then
         TAG_NAME="$CI_COMMIT_TAG"
+        echo "DEBUG: Using CI_COMMIT_TAG: $TAG_NAME"
       else
-        echo "ERROR: No VERSION variable or tag provided"
+        echo "ERROR: No INPUT_VERSION or CI_COMMIT_TAG provided"
         exit 1
       fi
       
@@ -81,7 +90,6 @@ validate_version:
       
       echo "Version validated: $TAG_NAME (Major: $MAJOR, Minor: $MINOR, Patch: $PATCH, Prerelease: $IS_PRERELEASE)"
       
-      
       echo "TAG_NAME=$TAG_NAME" > version.env
       echo "MAJOR=$MAJOR" >> version.env
       echo "MINOR=$MINOR" >> version.env
@@ -92,47 +100,69 @@ validate_version:
       dotenv: version.env
     expire_in: 1 hour
   rules:
-    - if: '$VERSION'
-    - if: '$CI_COMMIT_TAG'
+    - if: '$INPUT_VERSION != "" || $CI_COMMIT_TAG != ""'
 
 create_tag:
   extends: .semver_base
-  stage: tag
+  stage: semver
   needs: [validate_version]
   script:
     - |
       set -e
-      echo "Creating tag: $TAG_NAME"
+      echo "DEBUG: Creating/updating tag: $TAG_NAME, CI_COMMIT_SHA=$CI_COMMIT_SHA"
       
       retry_cmd git fetch --all --tags
       
-      # Check existing tag
+      # Check existing tag and update to latest commit
       if git tag -l | grep -q "^$TAG_NAME$"; then
-        if [ "${FORCE_RECREATE:-false}" != "true" ]; then
-          echo "ERROR: Tag exists. Set FORCE_RECREATE=true to overwrite"
-          exit 1
-        fi
-        echo "Recreating existing tag"
+        echo "Tag $TAG_NAME exists, updating to point to $CI_COMMIT_SHA"
         git tag -d "$TAG_NAME"
         retry_cmd git push origin ":refs/tags/$TAG_NAME"
       fi
       
-      # Create and push tag
-      git tag -a "$TAG_NAME" -m "Release $TAG_NAME"
+      # Create and push tag to latest commit
+      git tag -a "$TAG_NAME" "$CI_COMMIT_SHA" -m "Release $TAG_NAME"
       retry_cmd git push origin "$TAG_NAME"
       
-      echo "Tag created successfully: $TAG_NAME"
+      echo "Tag created/updated successfully: $TAG_NAME -> $CI_COMMIT_SHA"
   rules:
-    - if: '$VERSION'
+    - if: '$INPUT_VERSION != ""'
 
 create_release:
   extends: .semver_base
-  stage: release
-  needs: [validate_version]
+  stage: semver
+  needs:
+    - job: validate_version
+      optional: true
   script:
     - |
       set -e
-      echo "Creating release: $TAG_NAME"
+      echo "DEBUG: INPUT_VERSION=$INPUT_VERSION, INPUT_CREATE_RELEASE=$INPUT_CREATE_RELEASE, CI_COMMIT_SHA=$CI_COMMIT_SHA"
+      
+      if [ -z "${TAG_NAME:-}" ]; then
+        echo "No TAG_NAME provided, finding latest tag"
+        retry_cmd git fetch --all --tags
+        TAG_NAME=$(git tag -l 'v*' | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+(-[a-zA-Z0-9.-]+)?$' | sort -V | tail -1)
+        if [ -z "$TAG_NAME" ]; then
+          echo "ERROR: No tags found"
+          exit 1
+        fi
+        echo "DEBUG: Using latest tag: $TAG_NAME"
+      
+        # Parse version components
+        VERSION_NO_V="${TAG_NAME#v}"
+        BASE_VERSION=$(echo "$VERSION_NO_V" | sed 's/-.*//')
+        IFS='.' read -r MAJOR MINOR PATCH <<< "$BASE_VERSION"
+      
+        # Determine release type
+        if [[ "$TAG_NAME" =~ - ]]; then
+          IS_PRERELEASE="true"
+        else
+          IS_PRERELEASE="false"
+        fi
+      fi
+      
+      echo "Creating/updating release: $TAG_NAME"
       
       # Verify tag exists
       retry_cmd git fetch --all --tags
@@ -148,53 +178,58 @@ create_release:
       EXISTING=$(curl -s --header "PRIVATE-TOKEN: $GITLAB_BOT_TOKEN" \
         "https://${CI_SERVER_HOST}/api/v4/projects/$CI_PROJECT_ID/releases/$TAG_NAME" 2>/dev/null || echo "null")
       
-        if [ "$EXISTING" != "null" ] && [ "$EXISTING" != "" ]; then
-        if [ "${FORCE_RECREATE:-false}" != "true" ]; then
-        echo "Release already exists, skipping"
-        exit 0
-        fi
-        echo "Updating existing release"
-        fi
-        
-        # Set release status
-        if [ "$IS_PRERELEASE" = "true" ]; then
+      if [ "$EXISTING" != "null" ] && [ "$EXISTING" != "" ]; then
+        echo "Release already exists, updating"
+        # Delete existing release to update
+        retry_cmd curl -s --fail-with-body \
+          --request DELETE \
+          --header "PRIVATE-TOKEN: $GITLAB_BOT_TOKEN" \
+          "https://${CI_SERVER_HOST}/api/v4/projects/$CI_PROJECT_ID/releases/$TAG_NAME" > "/dev/null"
+      fi
+      
+      # Set release status
+      if [ "$IS_PRERELEASE" = "true" ]; then
         RELEASED_AT="null"
         echo "Creating draft release (prerelease)"
-        else
+      else
         RELEASED_AT="\"$(date -u +%Y-%m-%dT%H:%M:%S.000Z)\""
         echo "Creating published release"
-        fi
-        
-        # Create release
-        PAYLOAD=$(jq -nc \
+      fi
+      
+      # Create release
+      PAYLOAD=$(jq -nc \
         --arg name "Release $TAG_NAME" \
         --arg tag "$TAG_NAME" \
         --arg desc "$DESCRIPTION" \
         --argjson released "$RELEASED_AT" \
         '{name: $name, tag_name: $tag, description: $desc, released_at: $released}')
-        
-        retry_cmd curl -s --fail-with-body \
+      
+      retry_cmd curl -s --fail-with-body \
         --request POST \
-      --header "PRIVATE-TOKEN: $GITLAB_BOT_TOKEN" \
-      --header "Content-Type: application/json" \
+        --header "PRIVATE-TOKEN: $GITLAB_BOT_TOKEN" \
+        --header "Content-Type: application/json" \
         --data "$PAYLOAD" \
         "https://${CI_SERVER_HOST}/api/v4/projects/$CI_PROJECT_ID/releases" > "/dev/null"
       
-      echo "Release created: $CI_PROJECT_URL/-/releases/$TAG_NAME"
-      rules:
-        - if: '$CREATE_RELEASE == "true"'
+      echo "Release created/updated: $CI_PROJECT_URL/-/releases/$TAG_NAME"
+  rules:
+    - if: '$INPUT_VERSION != "" || $INPUT_CREATE_RELEASE == "true"'
 
 sync_tags:
   extends: .semver_base
-  stage: sync
-  needs: [validate_version]
+  stage: semver
+  needs:
+    - job: validate_version
+      optional: true
   script:
     - |
       set -e
+      echo "DEBUG: INPUT_VERSION=$INPUT_VERSION, INPUT_SYNC_TAGS=$INPUT_SYNC_TAGS, CI_COMMIT_SHA=$CI_COMMIT_SHA"
       
       # Determine sync target
       if [ -n "${TAG_NAME:-}" ]; then
         SYNC_TAG="$TAG_NAME"
+        echo "DEBUG: Using TAG_NAME: $SYNC_TAG"
       else
         echo "Finding latest published release"
         SYNC_TAG=$(curl -s --header "PRIVATE-TOKEN: $GITLAB_BOT_TOKEN" \
@@ -205,6 +240,7 @@ sync_tags:
           echo "No published releases found"
           exit 0
         fi
+        echo "DEBUG: Using latest published release: $SYNC_TAG"
       fi
       
       echo "Syncing tags for: $SYNC_TAG"
@@ -246,12 +282,18 @@ sync_tags:
         exit 1
       fi
       
-      # Get target commit
-      TAG_COMMIT=$(git rev-list -n 1 "$SYNC_TAG")
-      VERSION_NO_V="${SYNC_TAG#v}"
-      IFS='.' read -r MAJOR MINOR PATCH <<< "$VERSION_NO_V"
+      # Get target commit (use CI_COMMIT_SHA for INPUT_VERSION, else tag's commit)
+      if [ -n "${INPUT_VERSION:-}" ]; then
+        TAG_COMMIT="$CI_COMMIT_SHA"
+        echo "DEBUG: Using CI_COMMIT_SHA for INPUT_VERSION: $TAG_COMMIT"
+      else
+        TAG_COMMIT=$(git rev-list -n 1 "$SYNC_TAG")
+        echo "DEBUG: Using tag commit for $SYNC_TAG: $TAG_COMMIT"
+      fi
       
       # Update major tag
+      VERSION_NO_V="${SYNC_TAG#v}"
+      IFS='.' read -r MAJOR MINOR PATCH <<< "$VERSION_NO_V"
       MAJOR_TAG="v$MAJOR"
       echo "Updating major tag: $MAJOR_TAG"
       
@@ -276,46 +318,4 @@ sync_tags:
       
       echo "Tags synchronized: $MAJOR_TAG, latest -> ${TAG_COMMIT:0:8}"
   rules:
-    - if: '$SYNC_TAGS == "true"'
-
-cleanup_prereleases:
-  extends: .semver_base
-  stage: cleanup
-  script:
-    - |
-      set -e
-      echo "Cleaning up prerelease tags"
-      
-      retry_cmd git fetch --all --tags
-      
-      # Find prereleases
-      PRERELEASE_TAGS=$(git tag -l | grep -E '\-(alpha|beta|rc|dev)' | sort -V || true)
-      
-      if [ -z "$PRERELEASE_TAGS" ]; then
-        echo "No prerelease tags found"
-        exit 0
-      fi
-      
-      TAG_COUNT=$(echo "$PRERELEASE_TAGS" | wc -l)
-      KEEP_COUNT=${KEEP_PRERELEASES:-5}
-      
-      if [ $TAG_COUNT -le $KEEP_COUNT ]; then
-        echo "Keeping all $TAG_COUNT prerelease tags"
-        exit 0
-      fi
-      
-      DELETE_COUNT=$((TAG_COUNT - KEEP_COUNT))
-      TAGS_TO_DELETE=$(echo "$PRERELEASE_TAGS" | head -n $DELETE_COUNT)
-      
-      echo "Deleting $DELETE_COUNT old prerelease tags"
-      
-      echo "$TAGS_TO_DELETE" | while read -r tag; do
-        if [ -n "$tag" ]; then
-          retry_cmd git push origin ":refs/tags/$tag" || echo "Failed to delete $tag"
-        fi
-      done
-      
-      echo "Cleanup completed"
-  rules:
-    - if: '$CI_PIPELINE_SOURCE == "schedule"'
-  allow_failure: true
+    - if: '$INPUT_VERSION != "" || $INPUT_SYNC_TAGS == "true"'
